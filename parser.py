@@ -4,8 +4,9 @@ DEBUG_MACRO = 1
 
 
 import re
+import cProfile
 from pprint import pprint
-
+import tools
 
 class Source:
     def __init__(self, file, pos, line_no, line_pos):
@@ -135,7 +136,11 @@ def parse_comment(s, qualname="<anonymous>", pos=0, line=1):
     return pos_t, line, ["comment", s[pos:pos_t]]
 
 def parse_typedef(s, qualname="<anonymous>", pos=0, line=1, decorate=[]):
-    pos_t = find(s, ';', pos) + 1
+    # pos_t = find(s, ';', pos) + 1
+    pos_t_t = tools.find(s[pos:], ';', 0)
+    assert pos_t_t >= 0, (pos_t, pos_t_t, s[pos:pos+200])
+    # assert pos_t == pos + pos_t_t + 1, (pos_t, pos_t_t, s[pos:pos+200])
+    pos_t = pos + pos_t_t + 1
     # assert pos_t == s.find(';', pos+1) + 1, s[pos:pos_t]
     origin = s[pos:pos_t]
     line += origin.count('\n')
@@ -179,8 +184,11 @@ def split(s, sep=','):
     r = []
     l = p = 0
     while p < len(s):
-        pp = find(s, sep, p)
-        if pp != -1:
+        # pp = find(s, sep, p)
+        pp = pp_t = tools.find(s[p:], sep, 0)
+        assert pp_t > -2, (pp_t, s[p:p+200])
+        # assert pp_t==pp or pp_t + p == pp, (pp_t, s[p:p+200])
+        if pp_t >= 0:
             r.append(s[l:pp])
             l = p = pp + 1
         else:
@@ -520,14 +528,14 @@ def parse_static_assert(s, qualname="<anonymous>", pos=0, line=1, decorate=[]):
     return (pos_t, line, {"type": "static_assert", "namespace": qualname, "decorate": decorate, "origin": s[pos:pos_t]})
 
 # enum scope_type:
-#     kFile,
-#     kNamespace,
-#     kClass,
-#     kFunction,
-#     kMethod,
+#     kFile = 1,
+#     kNamespace =2,
+#     kClass 3,
+#     kFunction 4,
+#     kMethod 5,
 #
-def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=False, class_name=None, scope_type=kFile):
-    print(f"[#] parse_scope, is_class={is_class}, class_name={class_name!r}")
+def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=False, class_name=None, scope_type=1):
+    print(f"[#] parse_scope, is_class={is_class}, class_name={class_name!r}, scope_type={scope_type}")
     root = []
     decorate_t = []
     while pos < len(s):
@@ -539,17 +547,40 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
         if s[pos] == '\n':
             line += 1
             pos += 1
-        
         elif s[pos] == ' ':
+            pos += 1
+        elif s[pos] == '\t':
+            pos += 1
+        elif s[pos] == '\r':
+            pos += 1
+        elif s[pos] == '\v':
             pos += 1
         elif s[pos] == '#':
             pos_t, line, node = parse_macro(s, qualname, pos, line)
             pos = pos_t
             root.append(node)
-        elif s[pos:pos+2] in ['//', '/*']:
+        elif s[pos] == '/':
             pos_t, line, node = parse_comment(s, qualname, pos, line)
             pos = pos_t
             root.append(node)
+        # elif s[pos:pos+2] in ['//', '/*']:
+        #     pos_t, line, node = parse_comment(s, qualname, pos, line)
+        #     pos = pos_t
+        #     root.append(node)
+        elif s[pos] == '~':
+            decorate_t.append('~')
+            pos += 1
+        elif s[pos] == '[':
+            if s[pos:].startswith("[["):
+                pos_t = s.find(']]', pos+2)+2
+                origin = s[pos:pos_t]
+                decorate_t.append(origin)
+                pos = pos_t
+            else:
+                assert False, (s[pos], s[pos:pos+200])
+        elif s[pos] == ';':
+            pos += 1
+            assert not decorate_t
         elif s[pos] in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_":
             pos_t1, token = read_identifier(s, pos)
             # 关键字的优先级最高
@@ -583,6 +614,10 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
                 pos_t, line, node = parse_using(s, qualname, pos, line, decorate_t)
                 decorate_t = []
                 root.append(node)
+            elif token == "static_assert":
+                pos_t, line, node = parse_static_assert(s, qualname, pos, line, decorate_t)
+                decorate_t = []
+                root.append(node)
             elif token in ["mutable", "inline", "constexpr", "static", "typename", "const", "explicit", "friend", "virtual"]:
                 decorate_t.append(token)
                 pos_t = pos + len(token)
@@ -595,45 +630,33 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
                     decorate_t.append('__attribute ((__abi_tag__ ("cxx11")))')
                 else:
                     assert False, s[pos:pos+200]
-            elif is_class and token == class_name:
-                pos_t, line, node = parse_declaration(s, qualname, pos, line, decorate_t, is_constructor=True, class_name=class_name)
-                decorate_t = []
-                root.append(node)
+            elif is_class or scope_type == 3:
+                if token == class_name:
+                    pos_t, line, node = parse_declaration(s, qualname, pos, line, decorate_t, is_constructor=True, class_name=class_name)
+                    decorate_t = []
+                    root.append(node)
+                elif token in ["public", "private", "protected"]:
+                    node = {"type": "class_specifier", "origin": token}
+                    pos_t = pos + len(token)
+                    while s[pos_t] in ' \t\n\r':
+                        pos_t += 1
+                    if s[pos_t] == ':':
+                        pos_t += 1
+                elif token in ["operator"] or token in g_symtab:
+                    pos_t, line, node = parse_declaration(s, qualname, pos, line, decorate_t)
+                    decorate_t = []
+                    root.append(node)
+
+                else:
+                    raise ValueError("Token %r not know, line is %r"%(token, s[pos:pos+200]))
             elif token in ["operator"] or token in g_symtab:
                 pos_t, line, node = parse_declaration(s, qualname, pos, line, decorate_t)
                 decorate_t = []
                 root.append(node)
-            elif token in ["static_assert"]:
-                pos_t, line, node = parse_static_assert(s, qualname, pos, line, decorate_t)
-                decorate_t = []
-                root.append(node)
-            elif token in ["public", "private", "protected"]:
-                node = {"type": "class_specifier", "origin": token}
-                pos_t = pos + len(token)
-                while s[pos_t] in ' \t\n\r':
-                    pos_t += 1
-                if s[pos_t] == ':':
-                    pos_t += 1
-
             else:
                 raise ValueError("Token %r not know, line is %r"%(token, s[pos:pos+200]))
             assert pos < pos_t, (pos, pos_t, s[pos], s[pos:pos+200])
             pos = pos_t
-
-        elif s[pos] == '~':
-            decorate_t.append('~')
-            pos += 1
-        elif s[pos] == '[':
-            if s[pos:].startswith("[["):
-                pos_t = s.find(']]', pos+2)+2
-                origin = s[pos:pos_t]
-                decorate_t.append(origin)
-                pos = pos_t
-            else:
-                assert False, (s[pos], s[pos:pos+200])
-        elif s[pos] == ';':
-            pos += 1
-            assert not decorate_t
         else:
             assert False, (s[pos], s[pos:pos+200])
 
@@ -659,7 +682,8 @@ if 1:
         content = open("file.c++").read()
 
     try:
-        t = parse_file(content, "file.c++")
+        t = cProfile.run('parse_file(content, "file.c++")')
+        # t = parse_file(content, "file.c++")
     except:
         dump_g_symtab()
         raise
