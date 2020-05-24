@@ -22,33 +22,36 @@ class Symbol(dict):
         self.origins = origins
 
 
-class SymbolTable:
-	pass
-
+class SymbolTable(dict):
+    def __init__(self, parent):
+        self.parent = parent
 
 class SymbolTableTree:
     def __init__(self):
-        self.symbols = {}
+        self.symtab = SymbolTable(None)
 
     def create(self, name, source, origin):
-        s = self.symbols[name] = Symbol(name, source, origin)
+        s = self.symtab[name] = Symbol(name, source, origin)
         return s
 
     def push(self):
-    	pass
+        self.symtab = SymbolTable(parent=self.symtab)
 
     def pop(self):
-    	pass
+        self.symtab = self.symtab.parent
 
     def __getitem__(self, name):
-    	pass
+        symtab = self.symtab
+        while symtab:
+            if name in symtab:
+                return symtab[name]
+            symtab = symtab.parent
+    def __setitem__(self, name, value):
+        return self.symtab.__setitem__(name, value)
 
 
 g_source = Source("", 0, 0, 0)
-m_symtab = SymbolTable()
-# n_symtab.enter('namespace_a')
-# n_symtab.query('some_name') -> 
-# n_symtab.exit()
+m_symtab = SymbolTableTree()
 
 g_symtab = {
     "bool" : [],
@@ -516,8 +519,14 @@ def parse_static_assert(s, qualname="<anonymous>", pos=0, line=1, decorate=[]):
     line += s[pos:pos_t].count('\n')
     return (pos_t, line, {"type": "static_assert", "namespace": qualname, "decorate": decorate, "origin": s[pos:pos_t]})
 
-
-def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=False, class_name=None):
+# enum scope_type:
+#     kFile,
+#     kNamespace,
+#     kClass,
+#     kFunction,
+#     kMethod,
+#
+def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=False, class_name=None, scope_type=kFile):
     print(f"[#] parse_scope, is_class={is_class}, class_name={class_name!r}")
     root = []
     decorate_t = []
@@ -636,13 +645,10 @@ def parse_file(s, qualname="<anonymous>", pos=0, line=1):
 
 
 content = r"""
-# 1 "test_re.cc"
-# 1 "<built-in>"
-# 1 "<command-line>"
 
 
 """
-if 0:
+if 1:
     import sys
     if content.strip():
         load_g_symtab()
