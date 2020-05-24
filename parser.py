@@ -1,6 +1,54 @@
+
+
+DEBUG_MACRO = 1
+
+
 import re
 from pprint import pprint
 
+
+class Source:
+    def __init__(self, file, pos, line_no, line_pos):
+        self.file = file
+        self.pos = pos
+        self.line_no = line_no
+        self.line_pos = line_pos
+
+
+class Symbol(dict):
+    def __init__(self, name, sources=[], origins=[]):
+        self.name = name
+        self.sources = sources
+        self.origins = origins
+
+
+class SymbolTable:
+	pass
+
+
+class SymbolTableTree:
+    def __init__(self):
+        self.symbols = {}
+
+    def create(self, name, source, origin):
+        s = self.symbols[name] = Symbol(name, source, origin)
+        return s
+
+    def push(self):
+    	pass
+
+    def pop(self):
+    	pass
+
+    def __getitem__(self, name):
+    	pass
+
+
+g_source = Source("", 0, 0, 0)
+m_symtab = SymbolTable()
+# n_symtab.enter('namespace_a')
+# n_symtab.query('some_name') -> 
+# n_symtab.exit()
 
 g_symtab = {
     "bool" : [],
@@ -44,7 +92,20 @@ def read_identifier(s, pos):
 
 # https://stackoverflow.com/questions/15679756/g-e-option-output
 # "# linenum filename flags"
-# like '# 91 "/usr/include/stdint.h" 3 4'
+
+# The linenum specifies that the following line originated in filename at that line number. 
+# Then there are four flags:
+
+# 1 - Start of a new file
+# 2 - Returning to a file
+# 3 - System header file
+# 4 - Treat as being wrapped in extern "C"
+# So let's interpret your linemarker:
+
+# # 91 "/usr/include/stdint.h" 3 4
+# The following line originated from line 91 of /usr/include/stdint.h. 
+# It is a system header file and should be treated as wrapped in extern "C".
+
 
 def parse_macro(s, qualname="<anonymous>", pos=0, line=1):
     assert s[pos] == '#'
@@ -82,6 +143,9 @@ def parse_typedef(s, qualname="<anonymous>", pos=0, line=1, decorate=[]):
             if k not in g_symtab:
                 name = k
     g_symtab[name] = []
+    source = Source("<anonymous file>", pos, line, 0)
+    symbol = m_symtab.create(name, source, origin)
+
     print("[#] parse_typedef", 'result line:', origin)
     print("[#] parse_typedef", 'result name:', name)
         # while pos_t < len(s):
@@ -572,10 +636,13 @@ def parse_file(s, qualname="<anonymous>", pos=0, line=1):
 
 
 content = r"""
+# 1 "test_re.cc"
+# 1 "<built-in>"
+# 1 "<command-line>"
 
 
 """
-if __name__ == '__main__':
+if 0:
     import sys
     if content.strip():
         load_g_symtab()
@@ -592,3 +659,7 @@ if __name__ == '__main__':
         raise
 
     pprint(t[-1])
+
+if __name__ == '__main__':
+    t = parse_file(content, "file.c++")
+    pprint(t)
