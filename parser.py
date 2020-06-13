@@ -325,28 +325,103 @@ def parse_alignas(s, qualname="<anonymous>", pos=0, line=1, decorate=[]):
 
     return (pos_t, line, {"type": "alignas", "namespace": qualname, "origin": line})
 
-def consume_class_init_list(s, p):
-    """
-    1. val(some)
-    2. val{some}
-    3. val{ }, val{ } \n { }
-    """
+# def consume_class_init_list(s, p):
+#     """
+#     1. val(some)
+#     2. val{some}
+#     3. val{ }, val{ } \n { }
+#     """
+#     while True:
+#         p = find(s, ['{', ';'], p)
+#         if s[p] == ';': return p
+#         pp = find(s, '}', p+1) + 1
+#         while s[pp] in "\t \n\r\f\v":
+#             pp += 1
+#         # val{ } \n { }
+#         if s[pp] == '{':
+#             return pp
+#         # val{ } , ...
+#         if s[pp] == ',':
+#             p = pp
+#             continue
+#         return p
+
+def parse_parameters(s, qualname="<anonymous>", pos=0, line=1):
+    print(f"[#] parse_parameters, meet line: {s[pos:pos+200]!r}")
+    if s[pos] == '(':
+        p_end = find(s, ')', pos + 1)
+        assert p_end != -1
+        p_end += 1
+        return (p_end, line, {"type": "parameters", "origin": s[pos:p_end]})
+
+    assert 0
+
+
+def parse_empty(s, qualname="<anonymous>", pos=0, line=1):
+    while s[pos] in "\t \n\r\f\v":
+        pos += 1
+    return pos, line, {}
+
+def parse_constructor_init_list(s, qualname="<anonymous>", pos=0, line=1):
+    pos, line, _ = parse_empty(s, qualname, pos)
+    print(f"[#] parse_constructor_init_list, meet line: {s[pos:pos+200]!r}")
     while True:
-        p = find(s, ['{', ';'], p)
-        if s[p] == ';': return p
-        pp = find(s, '}', p+1) + 1
-        while s[pp] in "\t \n\r\f\v":
-            pp += 1
-        # val{ } \n { }
-        if s[pp] == '{':
-            return pp
-        # val{ } , ...
-        if s[pp] == ',':
-            p = pp
-            continue
-        return p
+        # name, pos_t = get_name(s, qualname, pos)
+        pos_t, name = read_identifier(s, pos)
+        pos_t, line, _ = parse_empty(s, qualname, pos_t)
+        if s[pos_t] == '(':
+            pos_t = find(s, ')', pos_t+1)
+        elif s[pos_t] == '{':
+            pos_t = find(s, '}', pos_t+1)
+        else:
+            assert 0
+        assert pos_t != -1
+        pos_t += 1
+        pos_t, line, node = parse_empty(s, qualname, pos_t)
+
+        if s[pos_t] == ',':
+            pos_t += 1
+            pos_t, line, node = parse_empty(s, qualname, pos_t)
+        else:
+            break
+
+    print(f"[#] parse_constructor_init_list, return:", {"type": "constructor_init_list", "origin": s[pos:pos_t]})
+    return pos_t, line, {"type": "constructor_init_list", "origin": s[pos:pos_t]}
 
 
+def parse_constructor(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_constructor=False, class_name=None):
+    print(f"[#] parse_constructor, meet line: {s[pos:pos+200]!r}")
+    param_start = s.find('(', pos)
+    assert param_start != -1
+    param_stop, line, node = parse_parameters(s, qualname, param_start)
+    pos_t, line, node = parse_empty(s, qualname, param_stop)
+
+    while True:
+        # 有初始化列表
+        if s[pos_t] == ':':
+            pos_t, line, node = parse_constructor_init_list(s, qualname, pos_t+1)
+            # print(node, repr(s[pos_t:pos_t+200]))
+            pos_t, line, _ = parse_empty(s, qualname, pos_t)
+            assert s[pos_t] == '{', f"[#] parse_constructor, meet line: {s[pos_t:pos_t+200]!r}"
+            p = find(s, '}', pos_t+1)
+            p_end = p + 1
+            break
+
+        elif s[pos_t] == '{':
+            p = find(s, '}', pos_t)
+            p_end = p + 1
+            break
+
+        elif s[pos_t] == ';':
+            p_end = pos_t + 1
+            break
+
+        else:
+            # 末尾修饰符
+            pos_t, name = read_identifier(s, pos_t)
+            pos_t, line, _ = parse_empty(s, qualname, pos_t)
+
+    return (p_end, line, {"type": "constructor", "origin": s[pos:p_end]})
 
 
 def parse_declaration(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_constructor=False, class_name=None):
@@ -361,16 +436,10 @@ def parse_declaration(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_
     6. TYPE<TYPE> (*signal(int sig, void(*func)(int)))(int);
     7. TYPE value();
     """
-    print(f"[#] parse_declaration, is_constructor={is_constructor}, meet line: {s[pos:pos+200]!r}")
+    print(f"[#] parse_declaration, meet line: {s[pos:pos+200]!r}")
     # step 1. 确定声明部分边界
     # '=' : TYPE value = ...;
-    if is_constructor:
-        p_mid = find(s, ['=', '{', ';', ':'], pos, care_angle_brackets=True)
-        if s[p_mid] == ':':
-            p_mid = consume_class_init_list(s, p_mid+1)
-
-    else:
-        p_mid = find(s, ['=', '{', ';'], pos, care_angle_brackets=True)
+    p_mid = find(s, ['=', '{', ';'], pos, care_angle_brackets=True)
     assert p_mid != -1
     print("[#] parse_declaration", "decl line:", s[pos:p_mid])
 
@@ -383,14 +452,18 @@ def parse_declaration(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_
         g_symtab[name] = s[pos:p_mid]
         print("[#] parse_declaration", "decl name:", name)
     else:
-        name = class_name
+        assert 0
 
+    subtype = None
     if s[p_mid] == '=':
         s_end = find(s, ';', p_mid+1)
+        subtype = "assign"
     elif s[p_mid] == '{':
         s_end = find(s, '}', p_mid+1)
+        subtype = "decl_impl"
     elif s[p_mid] == ';':
         s_end = p_mid
+        subtype = "decl"
     else:
         assert False, (s[p_mid], s[p_mid:p_mid+20])
     assert s_end != -1
@@ -398,7 +471,8 @@ def parse_declaration(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_
     line += s[pos:s_end+1].count("\n")
     pos_t = s_end+1
     print("[#] parse_declaration", "body:", s[p_mid:s_end+1])
-    return (pos_t, line, {"type": "declaration", "namespace": qualname + '::' + name, "decorate": decorate, "origin": s[pos:s_end+1]})
+    print(f"[#] parse_declaration_report, body: `{s[p_mid:s_end+1]!r}`, subtype: {subtype}")
+    return (pos_t, line, {"type": "declaration", "subtype": subtype, "namespace": qualname + '::' + name, "decorate": decorate, "origin": s[pos:s_end+1]})
 
 def find_pair_brace(s, pos, c):
     assert s[pos] == c
@@ -632,7 +706,7 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
                     assert False, s[pos:pos+200]
             elif is_class or scope_type == 3:
                 if token == class_name:
-                    pos_t, line, node = parse_declaration(s, qualname, pos, line, decorate_t, is_constructor=True, class_name=class_name)
+                    pos_t, line, node = parse_constructor(s, qualname, pos, line, decorate_t, is_constructor=True, class_name=class_name)
                     decorate_t = []
                     root.append(node)
                 elif token in ["public", "private", "protected"]:
@@ -669,8 +743,8 @@ def parse_file(s, qualname="<anonymous>", pos=0, line=1):
 
 content = r"""
 
-
 """
+
 if 1:
     import sys
     if content.strip():
@@ -682,8 +756,8 @@ if 1:
         content = open("file.c++").read()
 
     try:
-        t = cProfile.run('parse_file(content, "file.c++")')
-        # t = parse_file(content, "file.c++")
+        # t = cProfile.run('parse_file(content, "file.c++")')
+        t = parse_file(content, "file.c++")
     except:
         dump_g_symtab()
         raise
