@@ -184,13 +184,11 @@ def split(s, sep=','):
     r = []
     l = p = 0
     while p < len(s):
-        # pp = find(s, sep, p)
         pp = pp_t = tools.find(s[p:], sep, 0)
         assert pp_t > -2, (pp_t, s[p:p+200])
-        # assert pp_t==pp or pp_t + p == pp, (pp_t, s[p:p+200])
         if pp_t >= 0:
-            r.append(s[l:pp])
-            l = p = pp + 1
+            r.append(s[p:p+pp])
+            l = p = p + pp + 1
         else:
             break
     r.append(s[l:])        
@@ -737,8 +735,8 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
     return pos, line, root
 
 # http://eel.is/c++draft/temp
-def parse_template():
-    pass
+# def parse_template():
+#     pass
 
 def parse_file(s, qualname="<anonymous>", pos=0, line=1):
     return parse_scope(s, qualname, pos, line)
@@ -752,11 +750,23 @@ Y<X<1>> x3; // OK, same as Y<X<1> > x3;
 Y<X<6>>1>> x4; // syntax error 
 Y<X<(6>>1)>> x5; // OK 
 """
+content = """
 
+  template<bool, typename, typename>
+    struct conditional;
+
+  template<typename...>
+    struct __or_;
+
+
+"""
 if 1:
     import sys
     if content.strip():
-        load_g_symtab()
+        try:
+            load_g_symtab()
+        except:
+            pass
     elif len(sys.argv) > 1:
         content = sys.argv[1]
         print("[#]parse_file content:", content)
