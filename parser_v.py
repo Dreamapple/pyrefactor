@@ -736,13 +736,21 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
 
     return pos, line, root
 
+# http://eel.is/c++draft/temp
+def parse_template():
+    pass
 
 def parse_file(s, qualname="<anonymous>", pos=0, line=1):
     return parse_scope(s, qualname, pos, line)
 
 
 content = r"""
-
+template<int i> class X { /* ... */ }; 
+X< 1>2 > x1; // syntax error X<(1>2)> x2; // OK
+template<class T> class Y { /* ... */ }; 
+Y<X<1>> x3; // OK, same as Y<X<1> > x3; 
+Y<X<6>>1>> x4; // syntax error 
+Y<X<(6>>1)>> x5; // OK 
 """
 
 if 1:
