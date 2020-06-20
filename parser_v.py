@@ -94,6 +94,45 @@ def read_identifier(s, pos):
     return pos + m.end(), token
 
 
+brace_pair_dict = {}
+def raw_scan(content):
+    stack = []
+    idx = 0
+    while idx < len(content):
+        ch = content[idx]
+        if ch in '[{(':
+            stack.append((idx, ch))
+        elif ch in ')]}':
+            last_idx, last_ch = stack.pop()
+            brace_pair_dict[last_idx] = idx + 1
+        elif ch in ['"', "'"]:
+            last_idx = idx
+            while content[idx] != ch:
+                if content[idx] == "\\":
+                    idx += 2
+                else:
+                    idx += 1
+            brace_pair_dict[last_idx] = idx + 1
+        elif ch == '/':
+            last_idx = idx
+            if content[idx+1] == '/':
+                idx = content.find('\n', p+2)
+                brace_pair_dict[last_idx] = idx + 1
+            elif content[idx+1] == '*':
+                idx = content.find('*/', p+2)
+                brace_pair_dict[last_idx] = idx + 2
+                idx += 1
+            else:
+                pass
+
+        elif s[p] in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_":
+            m = re.match(r"[\w_][\w\d_]*", s[p:])
+            token = m.group()
+            p += m.end()
+ 
+    return -1
+
+
 # https://stackoverflow.com/questions/15679756/g-e-option-output
 # "# linenum filename flags"
 
@@ -118,10 +157,10 @@ def parse_macro(s, qualname="<anonymous>", pos=0, line=1):
     if m:
         line = int(m.group(1))
         qualname = m.group(2)
-        return pos_t, line, s[pos:pos_t]
+        return pos_t, line, {"type": "macro", "origin": s[pos:pos_t]}
     m = re.match(r'\#\s*([\w_][\w\d_]*)', s[pos:pos_t])
     if m:
-        return pos_t, line + 1, s[pos:pos_t]
+        return pos_t, line + 1, {"type": "macro", "origin": s[pos:pos_t]}
     
     raise Exception(s[pos:pos_t])
 
@@ -363,18 +402,21 @@ def parse_empty(s, qualname="<anonymous>", pos=0, line=1):
 def parse_constructor_init_list(s, qualname="<anonymous>", pos=0, line=1):
     pos, line, _ = parse_empty(s, qualname, pos)
     print(f"[#] parse_constructor_init_list, meet line: {s[pos:pos+200]!r}")
+
+    pos_t = pos
     while True:
-        # name, pos_t = get_name(s, qualname, pos)
-        pos_t, name = read_identifier(s, pos)
+        # name, pos_t = get_name(s, qualname, pos_t)
+        pos_t, name = read_identifier(s, pos_t)
         pos_t, line, _ = parse_empty(s, qualname, pos_t)
         if s[pos_t] == '(':
-            pos_t = find(s, ')', pos_t+1)
+            pos_t_t = find(s, ')', pos_t+1)
         elif s[pos_t] == '{':
-            pos_t = find(s, '}', pos_t+1)
+            pos_t_t = find(s, '}', pos_t+1)
         else:
             assert 0
-        assert pos_t != -1
-        pos_t += 1
+        assert pos_t_t != -1
+        assert pos_t_t != pos_t
+        pos_t = pos_t_t + 1
         pos_t, line, node = parse_empty(s, qualname, pos_t)
 
         if s[pos_t] == ',':
@@ -732,7 +774,7 @@ def parse_scope(s, qualname="<anonymous>", pos=0, line=1, decorate=[], is_class=
         else:
             assert False, (s[pos], s[pos:pos+200])
 
-    return pos, line, root
+    return pos, line, {"type": "scope", "namespace": qualname, "decorate": decorate, "root": root}
 
 # http://eel.is/c++draft/temp
 # def parse_template():
@@ -752,12 +794,6 @@ Y<X<(6>>1)>> x5; // OK
 """
 content = """
 
-  template<bool, typename, typename>
-    struct conditional;
-
-  template<typename...>
-    struct __or_;
-
 
 """
 if 1:
@@ -771,17 +807,18 @@ if 1:
         content = sys.argv[1]
         print("[#]parse_file content:", content)
     else:
-        content = open("file.c++").read()
+        # content = open("file.c++").read()
+        content = open("tests/manad.pp").read()
 
-    try:
-        # t = cProfile.run('parse_file(content, "file.c++")')
-        t = parse_file(content, "file.c++")
-    except:
-        dump_g_symtab()
-        raise
+    # try:
+    #     # t = cProfile.run('parse_file(content, "file.c++")')
+    #     t = parse_file(content, "file.c++")
+    # except:
+    #     dump_g_symtab()
+    #     raise
 
-    pprint(t[-1])
+    # pprint(t[-1])
 
 if __name__ == '__main__':
     t = parse_file(content, "file.c++")
-    pprint(t)
+    pprint(t[-1])
